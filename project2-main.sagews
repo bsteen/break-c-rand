@@ -28,7 +28,7 @@ def crand(seed):
         r.append(next)
         yield (next >> 1 if next < 2**32 else (next % 2**32) >> 1)
 
-# Generate next n terms of crand using the known previous 31 terms (known 31 terms must be consecutive)
+# Generate next n terms of crand using the known previous 31 consecutive terms
 def pseudo_rand(terms, n, extra):
     results = []
     output = []
@@ -62,76 +62,42 @@ def calculate_pre_shifts(theinput, index):
 # Used for debugging
 def verify_pre_shift_values(theinput, preshifts):
     for i in range(31, len(theinput)):
-        if preshifts[i] != None and len(preshifts[i]) == 1:
-            i3_good = preshifts[i - 3] != None and len(preshifts[i - 3]) == 1
-            i31_good = preshifts[i - 31] != None and len(preshifts[i - 31]) == 1
+        if len(preshifts[i]) == 1:
+            i3_good = len(preshifts[i - 3]) == 1
+            i31_good = len(preshifts[i - 31]) == 1
             if i3_good and i31_good:
                 s = (preshifts[i - 3][0] + preshifts[i - 31][0]) % 2**32
                 assert s == preshifts[i][0]
                 assert preshifts[i][0] >> 1 == theinput[i]
-        elif preshifts[i] != None and len(preshifts[i]) == 2:
+        elif len(preshifts[i]) == 2:
             assert preshifts[i][0] >> 1 == theinput[i], "preshifts[%d][0] does not downshift to expected value." % i
             assert preshifts[i][1] >> 1 == theinput[i], "preshifts[%d][1] does not downshift to expected value." % i
 #     print "All preshifted values with one option seem correct.\n"
 
-# When there is only one option for each composite value, you can confidently calculate the actual pre-shift value
-# Takes care of cases: Two preshift values, one option for each composite value; No preshift value, one option for each composite value
-def simplify_single_composite_value(preshifts):
+# This function performs two types of "easy" simplifcations on the pre right shifted values:
+# 1) When there is only one option for each composite value, you can confidently calculate the actual pre-shift value
+# 2) When there is only one possible pre-shift value and one of the two composite values are also decided,
+#    you can deduce the correct value for the other undecided composite value
+def simplify_easy_cases(preshifts):
     for n in range(31, len(preshifts)):
-        if preshifts[n - 3] != None and preshifts[n - 31] != None:
-            if len(preshifts[n - 3]) == 1 and len(preshifts[n - 31]) == 1:
-                preshifts[n] = [(preshifts[n - 3][0] + preshifts[n - 31][0]) % 2**32]
-    return preshifts
-
-# When there is only one possible pre-shift value and one of the two composite values are also decided,
-# you can deduce the correct value for the other undecided composite value
-# This function is HIDEOUS
-def simplify_last_double_composite(theinput, preshifts):
-    for n in range(31, len(preshifts)):
+        # Only 1 possibility for both composite values
+        if len(preshifts[n]) == 2 and len(preshifts[n - 3]) == 1 and len(preshifts[n - 31]) == 1:
+            preshifts[n] = [(preshifts[n - 3][0] + preshifts[n - 31][0]) % 2**32]
         # Only one possible pre-shift value
-        if preshifts[n] != None and len(preshifts[n]) == 1:
+        elif len(preshifts[n]) == 1:
             # N - 3 is decided, but N - 31 isn't
-            if preshifts[n - 3] != None and len(preshifts[n - 3]) == 1:
+            if len(preshifts[n - 3]) == 1 and len(preshifts[n - 31]) == 2:
                 if (preshifts[n - 3][0] + preshifts[n - 31][0]) % 2**32 == preshifts[n][0]:
                     preshifts[n - 31] = [preshifts[n - 31][0]]
                 else:
                     preshifts[n - 31] = [preshifts[n - 31][1]]
             # N - 31 is decided, but N - 3 isn't
-            elif preshifts[n - 3] != None and len(preshifts[n - 31]) == 1:
+            elif len(preshifts[n - 31]) == 1 and len(preshifts[n - 3]) == 2:
                 if (preshifts[n - 3][0] + preshifts[n - 31][0]) % 2**32 == preshifts[n][0]:
                     preshifts[n - 3] = [preshifts[n - 3][0]]
                 else:
                     preshifts[n - 3] = [preshifts[n - 3][1]]
             # Getting here means each composite value still has two options (BAD case...)
-
-        # Check when preshifts[n] is None, but also has a composite value with only one option
-        elif preshifts[n] == None and preshifts[n - 3] != None and preshifts[n - 31] != None:
-            if len(preshifts[n - 3]) == 1:
-                if ((preshifts[n - 3][0] + preshifts[n - 31][0]) % 2**32) >> 1 == ((preshifts[n - 3][0] + preshifts[n - 31][1]) % 2**32) >> 1:
-                    continue # Even though a composite value has only one option, the downshift means the second composite values still has 2 valid options
-                elif ((preshifts[n - 3][0] + preshifts[n - 31][0]) % 2**32) >> 1 == theinput[n]:
-                    preshifts[n] = [(preshifts[n - 3][0] + preshifts[n - 31][0]) % 2**32]
-                    preshifts[n - 31] = [preshifts[n - 31][0]]
-                elif ((preshifts[n - 3][0] + preshifts[n - 31][1]) % 2**32) >> 1 == theinput[n]:
-                    preshifts[n] = [(preshifts[n - 3][0] + preshifts[n - 31][1]) % 2**32]
-                    preshifts[n - 31] = [preshifts[n - 31][1]]
-                else: # Sanity Check
-                    assert False, "preshifts[%d] == None, but a composite value with only option doesn't get the correct result" % n
-            elif len(preshifts[n - 31]) == 1:
-                if ((preshifts[n - 3][0] + preshifts[n - 31][0]) % 2**32) >> 1 == ((preshifts[n - 3][1] + preshifts[n - 31][0]) % 2**32) >> 1:
-                    continue # Even though a composite value has only one option, the downshift means the second composite values still has 2 valid options
-                elif ((preshifts[n - 3][0] + preshifts[n - 31][0]) % 2**32) >> 1 == theinput[n]:
-                    preshifts[n] = [(preshifts[n - 3][0] + preshifts[n - 31][0]) % 2**32]
-                    preshifts[n - 3] = [preshifts[n - 3][0]]
-                elif ((preshifts[n - 3][1] + preshifts[n - 31][0]) % 2**32) >> 1 == theinput[n]:
-                    preshifts[n] = [(preshifts[n - 3][1] + preshifts[n - 31][0]) % 2**32]
-                    preshifts[n - 3] = [preshifts[n - 3][1]]
-                # Sanity Check
-                else:
-                    assert False, "preshifts[%d] == None, but a composite value with only option doesn't get the correct result" % n
-            # Getting here means each composite value still has two options and preshifts[n] == None (VERY BAD case...)
-
-        # Getting here means one or both composite values is None and preshifts[n] == None (SUPER BAD case, but not likely...)
     return preshifts
 
 # Used by simplifiy_down_tree
@@ -150,7 +116,7 @@ def aa(init, n, preshifts, a, answers):
     if n <= 30:
         answers[n] = a[n]
         return a[n]
-    elif n != init and preshifts[n] != None and len(preshifts[n]) == 1:
+    elif n != init and len(preshifts[n]) == 1:
         answers[n] = a[n]
         return a[n]
     else:
@@ -171,8 +137,6 @@ def count_double_options(lst, preshifts):
 def simplifiy_down_tree(preshifts):
     preshift_len = len(preshifts)
     for root_index in range(31, preshift_len):
-        if preshifts[root_index] == None:
-            continue
 
         a = VariableGenerator('a')
         answers = {}
@@ -226,9 +190,8 @@ def simplifiy_down_tree(preshifts):
 
 # After all possible preshift values are initially calculated, try to remove options that are not possible
 # Called by breaker after it has calcuate the initial preshift possibilites
-def simplify_pre_shifts(theinput, preshifts):
-    preshifts = simplify_single_composite_value(preshifts)
-    preshifts = simplify_last_double_composite(theinput, preshifts)
+def simplify_pre_shifts(preshifts):
+    preshifts = simplify_easy_cases(preshifts)    # Gets rid of the simple cases before doing the more complex analysis
     preshifts = simplifiy_down_tree(preshifts)
 
     # If the program is finding solutions and they doesn't match the actual output, enable this function call to help debug
@@ -259,7 +222,7 @@ def resolve_overlaps(pre_shift_values, result, index):
 # (Need to have value for 93 - 31 = index 62 and foward)
 def check_if_complete(simplified_preshifts):
     for i in range(92, 61, -1):
-        if simplified_preshifts[i] == None or len(simplified_preshifts[i]) != 1:
+        if len(simplified_preshifts[i]) != 1:
             return False
     return True
 
@@ -288,7 +251,7 @@ def breaker(theinput, rand_gen, amount_to_guess):
 
     # Do the first simplfication
     prev_simplified = pre_shift_values[:]
-    simplified = simplify_pre_shifts(theinput, pre_shift_values)
+    simplified = simplify_pre_shifts(pre_shift_values)
 
     num_simps = 1        # How many iterations of the simplification functions are needed to run before the pre-shift values can't be reduced anymore
     extra_values = 0     # If solution can't be found with the initial set of numbers, need to generate the next c rand value and see if we can solve then
@@ -297,27 +260,27 @@ def breaker(theinput, rand_gen, amount_to_guess):
     while extra_values < 31 :
         while simplified != prev_simplified:
             prev_simplified = simplified[:]
-            simplified = simplify_pre_shifts(theinput, simplified)
+            simplified = simplify_pre_shifts(simplified)
             num_simps = num_simps + 1
 
         print num_simps, "total simplifcations needed to verify reduction of combinations."
         print "Simplified values:\n", simplified, "\n"
 
         if not check_if_complete(simplified):
-            print "COULD NOT FIND SOLUTION. Need another number from c rand to continue."
+            print "COULD NOT FIND SOLUTION. Need another number from C rand to continue."
             shifted = rand_gen.next() << 1     # Generate the next random number in the sequence
             simplified += [[shifted, shifted + 1]]
             extra_values += 1
         else:
-            print "FOUND SOLUTION with", len(theinput) + extra_values, "consequative numbers from crand (%d was the goal; %d extra values were needed)." % (len(theinput), extra_values)
+            print "FOUND SOLUTION with", len(theinput) + extra_values, "consecutive numbers from crand (%d was the goal; %d extra values were needed)." % (len(theinput), extra_values)
             return pseudo_rand(simplified[62:], amount_to_guess, extra_values)
 
     print "COULD NOT FIND SOLUTION even with 30 extra numbers..."
     return []
 
 # MAIN CODE
-theseed = randint(1, 2**30)
-skip = randint(10000, 200000)
+theseed = 1026003471#randint(1, 2**30)
+skip = 182891#randint(10000, 200000)
 
 print "Seed:", theseed
 print "Skip:", skip
